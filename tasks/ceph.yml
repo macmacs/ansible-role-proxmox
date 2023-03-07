@@ -249,3 +249,33 @@
     state: 'mounted'
   when: "item.mountpoint is defined"
   loop: '{{ pve_ceph_fs }}'
+
+- block:
+    - name: Check if Ceph dashboard is enabled
+      shell:
+        cmd: ceph mgr module ls | grep 'dashboard.*on'
+      register: ceph_modules
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Set the variable
+      set_fact:
+        _ceph_dashboard_not_enabled: "{% if ceph_modules.stdout == '' %}true{% else %}false{% endif %}"
+
+    - name: Is Ceph dashboard enabled?
+      debug:
+        msg: "Dashboard disabled: {{ _ceph_dashboard_not_enabled }}"
+
+    - name: Enable Ceph dashboard
+      ansible.builtin.shell: |
+        ceph mgr module enable dashboard
+        echo {{ ceph_dashboard_password }} > ceph_password
+        ceph dashboard ac-user-create macmacs administrator -i ceph_password
+        rm -f ceph_password
+        ceph config-key set mgr/dashboard/server_addr ::
+        ceph dashboard create-self-signed-cert
+        ceph mgr module disable dashboard
+        ceph mgr module enable dashboard
+        systemctl restart ceph-mgr.target
+      when: _ceph_dashboard_not_enabled
+  when: "inventory_hostname == groups[pve_ceph_mgr_group][0]"
